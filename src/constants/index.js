@@ -64,6 +64,12 @@ export const WEEK_DAYS = [
 // 菜品类别（用于营养评分）
 export const DISH_CATEGORIES = ['蔬菜', '肉类', '水产', '蛋奶', '主食', '干货', '其他']
 
+// 菜品自定义标签的推荐项（用户可输入任意标签，这里只是快捷建议）
+export const DISH_TAG_PRESETS = ['快手', '低卡', '孩子爱吃', '下饭', '素食', '宴客']
+
+// 自定义标签的展示颜色
+export const DISH_TAG_COLOR = '#7e57c2'
+
 // 营养食物组
 export const FOOD_GROUPS = {
   蛋白质: ['肉类', '水产', '蛋奶', '干货'],

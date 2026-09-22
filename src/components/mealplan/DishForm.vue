@@ -1,7 +1,8 @@
 <script setup>
-import { reactive, ref } from 'vue'
-import { DISH_CATEGORIES, DIFFICULTIES, UNITS } from '@/constants'
+import { reactive, ref, computed } from 'vue'
+import { DISH_CATEGORIES, DIFFICULTIES, UNITS, DISH_TAG_PRESETS } from '@/constants'
 import { useInventoryStore } from '@/stores/inventory'
+import { useMealPlanStore } from '@/stores/mealPlan'
 
 const props = defineProps({
   initial: { type: Object, default: null },
@@ -9,6 +10,7 @@ const props = defineProps({
 const emit = defineEmits(['submit', 'cancel'])
 
 const inventory = useInventoryStore()
+const mealPlan = useMealPlanStore()
 
 const form = reactive({
   name: props.initial?.name || '',
@@ -16,12 +18,30 @@ const form = reactive({
   difficulty: props.initial?.difficulty || '简单',
   cookTime: props.initial?.cookTime ?? 15,
   instructions: props.initial?.instructions || '',
+  tags: [...(props.initial?.tags || [])],
   ingredients: props.initial?.ingredients?.length
     ? props.initial.ingredients.map((i) => ({ ...i }))
     : [{ ingredientId: null, name: '', quantity: 1, unit: '克' }],
 })
 
 const pickValue = ref('')
+const tagInput = ref('')
+
+// 标签快捷建议：已用过的标签优先，加上预设，排除已选
+const tagSuggestions = computed(() => {
+  const pool = [...mealPlan.allTags, ...DISH_TAG_PRESETS]
+  return [...new Set(pool)].filter((t) => !form.tags.includes(t)).slice(0, 8)
+})
+
+function addTag(tag) {
+  const v = (tag ?? tagInput.value).trim()
+  if (v && !form.tags.includes(v)) form.tags.push(v)
+  tagInput.value = ''
+}
+
+function removeTag(tag) {
+  form.tags = form.tags.filter((t) => t !== tag)
+}
 
 function addIngredient() {
   form.ingredients.push({ ingredientId: null, name: '', quantity: 1, unit: '克' })
@@ -53,10 +73,12 @@ function submit() {
   const ingredients = form.ingredients
     .filter((i) => i.name.trim())
     .map((i) => ({ ...i, name: i.name.trim(), quantity: Number(i.quantity) }))
+  const tags = [...new Set(form.tags.map((t) => t.trim()).filter(Boolean))]
   emit('submit', {
     ...form,
     name: form.name.trim(),
     cookTime: Number(form.cookTime),
+    tags,
     ingredients,
   })
 }
@@ -107,6 +129,30 @@ function submit() {
           <option v-for="u in UNITS" :key="u" :value="u">{{ u }}</option>
         </select>
         <button type="button" class="del-btn" @click="removeIngredient(idx)">✕</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>标签（可多个，方便筛选）</label>
+      <div v-if="form.tags.length" class="tag-list">
+        <span v-for="t in form.tags" :key="t" class="tag-item">
+          {{ t }}
+          <button type="button" class="tag-rm" @click="removeTag(t)">✕</button>
+        </span>
+      </div>
+      <div class="tag-input-row">
+        <input
+          v-model="tagInput"
+          type="text"
+          placeholder="自定义标签，如：快手、低卡、孩子爱吃"
+          @keydown.enter.prevent="addTag()"
+        />
+        <button type="button" class="add-btn" @click="addTag()">+ 添加</button>
+      </div>
+      <div v-if="tagSuggestions.length" class="tag-suggest">
+        <button v-for="t in tagSuggestions" :key="t" type="button" class="suggest-chip" @click="addTag(t)">
+          {{ t }}
+        </button>
       </div>
     </div>
 
@@ -174,6 +220,55 @@ textarea:focus {
   padding: 0 12px;
   cursor: pointer;
   white-space: nowrap;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: #7e57c222;
+  color: #7e57c2;
+  font-weight: 500;
+}
+.tag-rm {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+.tag-input-row {
+  display: flex;
+  gap: 8px;
+}
+.tag-input-row input {
+  flex: 1;
+}
+.tag-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.suggest-chip {
+  border: 1px dashed var(--border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.suggest-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .ing-row {
   display: flex;

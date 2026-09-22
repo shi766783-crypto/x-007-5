@@ -73,7 +73,7 @@ function fmt(iso) {
           <div class="dish-pick">
             <select v-model="pickedDish[item.id]">
               <option value="">选择要做的菜…</option>
-              <option v-for="d in mealPlan.dishes" :key="d.id" :value="d.name">{{ d.name }}</option>
+              <option v-for="d in mealPlan.dishesByFavorite" :key="d.id" :value="d.name">{{ d.favorite ? '★ ' : '' }}{{ d.name }}</option>
             </select>
             <input v-model="pickedDish[item.id]" type="text" placeholder="或输入新菜名" />
           </div>

@@ -16,8 +16,19 @@ function createDish(data) {
     instructions: '',
     cookTime: 15,
     difficulty: '简单',
+    tags: [], // 自定义标签，可多个，如 ['快手', '孩子爱吃']
+    favorite: false,
     publishedAt: new Date().toISOString(),
     ...data,
+  }
+}
+
+// 兼容旧数据：补齐 tags / favorite 字段
+function normalizeDish(d) {
+  return {
+    ...d,
+    tags: Array.isArray(d.tags) ? d.tags : [],
+    favorite: !!d.favorite,
   }
 }
 
@@ -31,7 +42,7 @@ function emptyWeek() {
 
 export const useMealPlanStore = defineStore('mealPlan', {
   state: () => ({
-    dishes: read(DISH_KEY, []),
+    dishes: read(DISH_KEY, []).map(normalizeDish),
     // { [weekKey]: { [dayKey]: { breakfast: [], lunch: [], dinner: [] } } }
     plan: read(PLAN_KEY, {}),
   }),
@@ -63,6 +74,22 @@ export const useMealPlanStore = defineStore('mealPlan', {
       const map = {}
       this.dishes.forEach((d) => (map[d.id] = d))
       return map
+    },
+
+    // 收藏优先的菜品列表（原顺序保持稳定）
+    dishesByFavorite() {
+      return [...this.dishes].sort((a, b) => Number(b.favorite) - Number(a.favorite))
+    },
+
+    // 所有已使用过的标签，按使用次数降序（供筛选/表单建议）
+    allTags() {
+      const count = {}
+      this.dishes.forEach((d) => {
+        ;(d.tags || []).forEach((t) => {
+          count[t] = (count[t] || 0) + 1
+        })
+      })
+      return Object.keys(count).sort((a, b) => count[b] - count[a] || a.localeCompare(b, 'zh'))
     },
 
     // 本周所需食材总量（按名称+单位聚合）
@@ -129,6 +156,13 @@ export const useMealPlanStore = defineStore('mealPlan', {
       const idx = this.dishes.findIndex((d) => d.id === id)
       if (idx === -1) return
       this.dishes[idx] = { ...this.dishes[idx], ...patch }
+      this.persistDishes()
+    },
+
+    toggleFavorite(id) {
+      const dish = this.dishes.find((d) => d.id === id)
+      if (!dish) return
+      dish.favorite = !dish.favorite
       this.persistDishes()
     },
 
