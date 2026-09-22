@@ -2,7 +2,8 @@
 import { ref, computed } from 'vue'
 import { useMealPlanStore } from '@/stores/mealPlan'
 import { WEEK_DAYS, MEALS, MEAL_ICONS, DIFFICULTY_COLORS } from '@/constants'
-import { currentWeekKey, toWeekKey, parseDateKey, weekStartFromKey, currentWeekStart } from '@/utils/date'
+import { currentWeekKey, toWeekKey, parseDateKey, weekStartFromKey } from '@/utils/date'
+import { tagColor } from '@/utils/tagColor'
 import DishForm from '@/components/mealplan/DishForm.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import BaseButton from '@/components/common/BaseButton.vue'
@@ -17,7 +18,10 @@ const showDishForm = ref(false)
 const showLibrary = ref(false)
 const editingDish = ref(null)
 const slotTarget = ref({ day: 'monday', meal: '早餐' })
-const search = ref('')
+const search = ref('') // 选菜弹窗搜索
+const libSearch = ref('') // 菜谱库搜索
+const activeTags = ref([]) // 选菜弹窗选中的标签
+const libActiveTags = ref([]) // 菜谱库选中的标签
 
 const weekDays = computed(() => mealPlan.plan[weekKey.value] || {})
 const weekLabel = computed(() => {
@@ -26,11 +30,42 @@ const weekLabel = computed(() => {
   return `${d.getMonth() + 1}月${d.getDate()}日 起`
 })
 
+// 关键词匹配菜名或标签
+function matchKeyword(dish, q) {
+  return dish.name.includes(q) || dish.tags.some((t) => t.includes(q))
+}
+
+// 选菜列表：搜索 + 标签筛选，收藏菜品排在前面
 const filteredDishes = computed(() => {
   const q = search.value.trim()
-  if (!q) return mealPlan.dishes
-  return mealPlan.dishes.filter((d) => d.name.includes(q))
+  const tags = activeTags.value
+  return mealPlan.dishes
+    .filter(
+      (d) =>
+        (!q || matchKeyword(d, q)) &&
+        tags.every((t) => d.tags.includes(t))
+    )
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite))
 })
+
+// 菜谱库列表：搜索 + 标签筛选，收藏置顶
+const filteredLibrary = computed(() => {
+  const q = libSearch.value.trim()
+  const tags = libActiveTags.value
+  return mealPlan.dishes
+    .filter(
+      (d) =>
+        (!q || matchKeyword(d, q)) &&
+        tags.every((t) => d.tags.includes(t))
+    )
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite))
+})
+
+function toggleTag(list, tag) {
+  const idx = list.value.indexOf(tag)
+  if (idx === -1) list.value.push(tag)
+  else list.value.splice(idx, 1)
+}
 
 function shiftWeek(delta) {
   const start = parseDateKey(weekStartFromKey(weekKey.value))
@@ -113,17 +148,54 @@ function mealSlot(day, meal) {
     </div>
 
     <!-- 菜品选择 -->
-    <BaseModal :show="showSlotPicker" :title="`为 ${slotTarget.meal} 选择菜品`" @close="showSlotPicker = false">
+    <BaseModal :show="showSlotPicker" :title="`为 ${slotTarget.meal} 选择菜品`" width="560px" @close="showSlotPicker = false">
       <div class="picker-search">
-        <input v-model="search" type="text" placeholder="搜索菜品…" />
+        <input v-model="search" type="text" placeholder="搜索菜名或标签…" />
         <BaseButton size="sm" variant="ghost" @click="openNewDish">+ 新建</BaseButton>
       </div>
-      <BaseEmpty v-if="!filteredDishes.length" emoji="🍲" text="还没有菜谱，先新建一道菜吧" />
+      <div v-if="mealPlan.allTags.length" class="tag-filter">
+        <button
+          v-for="t in mealPlan.allTags"
+          :key="t.name"
+          type="button"
+          class="tag-filter-item"
+          :class="{ active: activeTags.includes(t.name) }"
+          :style="activeTags.includes(t.name)
+            ? { background: tagColor(t.name), borderColor: tagColor(t.name), color: '#fff' }
+            : { color: tagColor(t.name) }"
+          @click="toggleTag(activeTags, t.name)"
+        >
+          {{ t.name }} <span class="tag-count">{{ t.count }}</span>
+        </button>
+        <button v-if="activeTags.length" type="button" class="tag-clear" @click="activeTags = []">
+          清除筛选
+        </button>
+      </div>
+      <BaseEmpty v-if="!filteredDishes.length" emoji="🍲" text="没有符合条件的菜品，换个关键词或标签试试" />
       <div v-else class="dish-list">
         <div v-for="dish in filteredDishes" :key="dish.id" class="dish-row">
+          <button
+            type="button"
+            class="star"
+            :class="{ on: dish.favorite }"
+            :title="dish.favorite ? '取消收藏' : '收藏'"
+            @click="mealPlan.toggleFavorite(dish.id)"
+          >
+            {{ dish.favorite ? '★' : '☆' }}
+          </button>
           <div class="dish-info">
-            <span class="dish-name">{{ dish.name }}</span>
+            <span class="dish-name">
+              {{ dish.name }}
+            </span>
             <span class="muted small">{{ dish.ingredients.length }} 种食材 · {{ dish.cookTime }}分钟</span>
+            <span v-if="dish.tags.length" class="dish-tags">
+              <span
+                v-for="t in dish.tags"
+                :key="t"
+                class="mini-tag"
+                :style="{ background: tagColor(t) + '22', color: tagColor(t) }"
+              >{{ t }}</span>
+            </span>
           </div>
           <BaseButton size="sm" @click="pickDish(dish.id)">加入</BaseButton>
         </div>
@@ -132,12 +204,53 @@ function mealSlot(day, meal) {
 
     <!-- 菜谱库 -->
     <BaseModal :show="showLibrary" title="我的菜谱库" width="640px" @close="showLibrary = false">
+      <div class="lib-toolbar">
+        <input v-model="libSearch" type="text" placeholder="搜索菜名或标签…" />
+      </div>
+      <div v-if="mealPlan.allTags.length" class="tag-filter">
+        <button
+          v-for="t in mealPlan.allTags"
+          :key="t.name"
+          type="button"
+          class="tag-filter-item"
+          :class="{ active: libActiveTags.includes(t.name) }"
+          :style="libActiveTags.includes(t.name)
+            ? { background: tagColor(t.name), borderColor: tagColor(t.name), color: '#fff' }
+            : { color: tagColor(t.name) }"
+          @click="toggleTag(libActiveTags, t.name)"
+        >
+          {{ t.name }} <span class="tag-count">{{ t.count }}</span>
+        </button>
+        <button v-if="libActiveTags.length" type="button" class="tag-clear" @click="libActiveTags = []">
+          清除筛选
+        </button>
+      </div>
       <BaseEmpty v-if="!mealPlan.dishes.length" emoji="📖" text="暂无菜谱" />
+      <BaseEmpty v-else-if="!filteredLibrary.length" emoji="🔍" text="没有符合条件的菜品" />
       <div v-else class="library">
-        <div v-for="dish in mealPlan.dishes" :key="dish.id" class="lib-item">
+        <div v-for="dish in filteredLibrary" :key="dish.id" class="lib-item">
           <div class="lib-head">
-            <span class="dish-name">{{ dish.name }}</span>
+            <span class="dish-name">
+              <button
+                type="button"
+                class="star"
+                :class="{ on: dish.favorite }"
+                :title="dish.favorite ? '取消收藏' : '收藏'"
+                @click="mealPlan.toggleFavorite(dish.id)"
+              >
+                {{ dish.favorite ? '★' : '☆' }}
+              </button>
+              {{ dish.name }}
+            </span>
             <BaseTag :category="dish.category" :text="dish.category" />
+          </div>
+          <div v-if="dish.tags.length" class="dish-tags">
+            <span
+              v-for="t in dish.tags"
+              :key="t"
+              class="mini-tag"
+              :style="{ background: tagColor(t) + '22', color: tagColor(t) }"
+            >{{ t }}</span>
           </div>
           <div class="muted small">
             {{ dish.ingredients.map((i) => i.name).join('、') || '无食材' }} · {{ dish.cookTime }}分钟 · {{ dish.difficulty }}
@@ -268,12 +381,74 @@ function mealSlot(day, meal) {
   gap: 8px;
   margin-bottom: 12px;
 }
-.picker-search input {
+.picker-search input,
+.lib-toolbar input {
   flex: 1;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
+}
+.lib-toolbar {
+  margin-bottom: 10px;
+}
+.tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.tag-filter-item {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.tag-filter-item:hover {
+  border-color: currentColor;
+}
+.tag-count {
+  opacity: 0.55;
+  font-size: 11px;
+}
+.tag-clear {
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.star {
+  border: none;
+  background: none;
+  font-size: 17px;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.star:hover {
+  color: #ffa000;
+}
+.star.on {
+  color: #ffa000;
+}
+.dish-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mini-tag {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 .dish-list,
 .library {
@@ -293,6 +468,15 @@ function mealSlot(day, meal) {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.dish-row {
+  align-items: flex-start;
+}
+.dish-row .star {
+  margin-top: 2px;
+}
+.dish-row :deep(button) {
+  flex-shrink: 0;
+}
 .lib-item {
   flex-direction: column;
   align-items: stretch;
@@ -301,6 +485,11 @@ function mealSlot(day, meal) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.lib-head .dish-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .dish-info {
   display: flex;

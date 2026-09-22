@@ -1,7 +1,9 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { DISH_CATEGORIES, DIFFICULTIES, UNITS } from '@/constants'
 import { useInventoryStore } from '@/stores/inventory'
+import { useMealPlanStore } from '@/stores/mealPlan'
+import { tagColor } from '@/utils/tagColor'
 
 const props = defineProps({
   initial: { type: Object, default: null },
@@ -9,6 +11,7 @@ const props = defineProps({
 const emit = defineEmits(['submit', 'cancel'])
 
 const inventory = useInventoryStore()
+const mealPlan = useMealPlanStore()
 
 const form = reactive({
   name: props.initial?.name || '',
@@ -16,12 +19,22 @@ const form = reactive({
   difficulty: props.initial?.difficulty || '简单',
   cookTime: props.initial?.cookTime ?? 15,
   instructions: props.initial?.instructions || '',
+  favorite: !!props.initial?.favorite,
+  tags: props.initial?.tags ? [...props.initial.tags] : [],
   ingredients: props.initial?.ingredients?.length
     ? props.initial.ingredients.map((i) => ({ ...i }))
     : [{ ingredientId: null, name: '', quantity: 1, unit: '克' }],
 })
 
 const pickValue = ref('')
+const tagInput = ref('')
+
+// 已使用过、当前菜品还没挂上的标签，供快速点选
+const tagSuggestions = computed(() =>
+  mealPlan.allTags
+    .map((t) => t.name)
+    .filter((t) => !form.tags.includes(t))
+)
 
 function addIngredient() {
   form.ingredients.push({ ingredientId: null, name: '', quantity: 1, unit: '克' })
@@ -48,6 +61,17 @@ function applyPick() {
   pickValue.value = ''
 }
 
+function addTag(raw) {
+  const name = (raw ?? tagInput.value).trim()
+  tagInput.value = ''
+  if (!name || form.tags.includes(name)) return
+  form.tags.push(name)
+}
+
+function removeTag(name) {
+  form.tags = form.tags.filter((t) => t !== name)
+}
+
 function submit() {
   if (!form.name.trim()) return
   const ingredients = form.ingredients
@@ -57,6 +81,7 @@ function submit() {
     ...form,
     name: form.name.trim(),
     cookTime: Number(form.cookTime),
+    tags: [...new Set(form.tags.map((t) => t.trim()).filter(Boolean))],
     ingredients,
   })
 }
@@ -66,7 +91,18 @@ function submit() {
   <form class="dish-form" @submit.prevent="submit">
     <div class="field">
       <label>菜名 *</label>
-      <input v-model="form.name" type="text" placeholder="如：番茄炒蛋" required />
+      <div class="name-row">
+        <input v-model="form.name" type="text" placeholder="如：番茄炒蛋" required />
+        <button
+          type="button"
+          class="fav-btn"
+          :class="{ active: form.favorite }"
+          :title="form.favorite ? '取消收藏' : '收藏这道菜'"
+          @click="form.favorite = !form.favorite"
+        >
+          {{ form.favorite ? '★' : '☆' }}
+        </button>
+      </div>
     </div>
 
     <div class="row">
@@ -85,6 +121,36 @@ function submit() {
       <div class="field">
         <label>烹饪时长（分钟）</label>
         <input v-model.number="form.cookTime" type="number" min="1" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>自定义标签</label>
+      <div class="tags-selected">
+        <span v-for="t in form.tags" :key="t" class="tag-chip" :style="{ background: tagColor(t) + '22', color: tagColor(t) }">
+          {{ t }}
+          <button type="button" class="tag-x" :style="{ color: tagColor(t) }" @click="removeTag(t)">✕</button>
+        </span>
+        <input
+          v-model="tagInput"
+          type="text"
+          class="tag-input"
+          :placeholder="form.tags.length ? '添加标签' : '如：快手、低卡、孩子爱吃，回车添加'"
+          @keydown.enter.prevent="addTag()"
+          @keydown.delete="tagInput || form.tags.pop()"
+        />
+      </div>
+      <div v-if="tagSuggestions.length" class="tag-suggest">
+        <span class="muted small">常用：</span>
+        <button
+          v-for="t in tagSuggestions"
+          :key="t"
+          type="button"
+          class="tag-suggest-item"
+          @click="addTag(t)"
+        >
+          + {{ t }}
+        </button>
       </div>
     </div>
 
@@ -142,6 +208,93 @@ function submit() {
   font-size: 12px;
   color: var(--text-2);
   font-weight: 500;
+}
+.name-row {
+  display: flex;
+  gap: 8px;
+}
+.name-row input {
+  flex: 1;
+}
+.fav-btn {
+  width: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 18px;
+  color: #bbb;
+  cursor: pointer;
+}
+.fav-btn.active {
+  background: #fff8e1;
+  border-color: #ffb300;
+  color: #ffa000;
+}
+.tags-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.tags-selected:focus-within {
+  border-color: var(--primary);
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tag-x {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.tag-x:hover {
+  opacity: 1;
+}
+.tag-input {
+  flex: 1;
+  min-width: 140px;
+  border: none !important;
+  padding: 2px 0 !important;
+}
+.tag-input:focus {
+  outline: none;
+}
+.tag-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.tag-suggest-item {
+  border: 1px dashed var(--border);
+  background: #fff;
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.tag-suggest-item:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.small {
+  font-size: 12px;
 }
 input,
 select,

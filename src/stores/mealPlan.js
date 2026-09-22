@@ -7,8 +7,26 @@ import { WEEK_DAYS, MEALS } from '@/constants'
 const DISH_KEY = 'dishes'
 const PLAN_KEY = 'plan'
 
+// 规范化标签：去空白、去重，保证旧数据也有 tags / favorite 字段
+function normalizeDish(dish) {
+  const tags = Array.isArray(dish.tags)
+    ? [...new Set(dish.tags.map((t) => String(t).trim()).filter(Boolean))]
+    : []
+  return { ...dish, tags, favorite: !!dish.favorite }
+}
+
+function loadDishes() {
+  const raw = read(DISH_KEY, []) || []
+  const dishes = raw.map(normalizeDish)
+  const needMigrate = raw.some(
+    (d) => !Array.isArray(d.tags) || typeof d.favorite !== 'boolean'
+  )
+  if (needMigrate) write(DISH_KEY, dishes)
+  return dishes
+}
+
 function createDish(data) {
-  return {
+  return normalizeDish({
     id: uid('dish'),
     name: '',
     category: '蔬菜',
@@ -16,9 +34,11 @@ function createDish(data) {
     instructions: '',
     cookTime: 15,
     difficulty: '简单',
+    tags: [], // 自定义标签，如：快手、低卡、孩子爱吃
+    favorite: false,
     publishedAt: new Date().toISOString(),
     ...data,
-  }
+  })
 }
 
 function emptyWeek() {
@@ -31,7 +51,7 @@ function emptyWeek() {
 
 export const useMealPlanStore = defineStore('mealPlan', {
   state: () => ({
-    dishes: read(DISH_KEY, []),
+    dishes: loadDishes(),
     // { [weekKey]: { [dayKey]: { breakfast: [], lunch: [], dinner: [] } } }
     plan: read(PLAN_KEY, {}),
   }),
@@ -64,6 +84,21 @@ export const useMealPlanStore = defineStore('mealPlan', {
       this.dishes.forEach((d) => (map[d.id] = d))
       return map
     },
+
+    // 所有自定义标签及使用数量，按使用频次排序
+    allTags() {
+      const counts = {}
+      this.dishes.forEach((d) => {
+        d.tags.forEach((t) => {
+          counts[t] = (counts[t] || 0) + 1
+        })
+      })
+      return Object.keys(counts)
+        .map((name) => ({ name, count: counts[name] }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh'))
+    },
+
+    favoriteCount: (state) => state.dishes.filter((d) => d.favorite).length,
 
     // 本周所需食材总量（按名称+单位聚合）
     weeklyRequirements() {
@@ -128,8 +163,14 @@ export const useMealPlanStore = defineStore('mealPlan', {
     updateDish(id, patch) {
       const idx = this.dishes.findIndex((d) => d.id === id)
       if (idx === -1) return
-      this.dishes[idx] = { ...this.dishes[idx], ...patch }
+      this.dishes[idx] = normalizeDish({ ...this.dishes[idx], ...patch })
       this.persistDishes()
+    },
+
+    toggleFavorite(id) {
+      const dish = this.dishes.find((d) => d.id === id)
+      if (!dish) return
+      this.updateDish(id, { favorite: !dish.favorite })
     },
 
     removeDish(id) {
